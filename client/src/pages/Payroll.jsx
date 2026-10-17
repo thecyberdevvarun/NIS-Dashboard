@@ -1,321 +1,127 @@
-import { useState, useEffect, useMemo } from "react";
-import { useApp } from "../context/AppContext";
-import Card from "../components/common/Card";
-import Button from "../components/common/Button";
-import Modal from "../components/common/Modal";
-import SearchBar from "../components/common/SearchBar";
-import Pagination from "../components/common/Pagination";
-import EmptyState from "../components/common/EmptyState";
-import ConfirmDialog from "../components/common/ConfirmDialog";
-import PayrollForm from "../components/payroll/PayrollForm";
-import PayrollTable from "../components/payroll/PayrollTable";
-import { PageLoader } from "../components/common/Loader";
-import {
-  HiOutlinePlus,
-  HiOutlineDownload,
-  HiOutlineCash,
-  HiOutlineCheckCircle,
-} from "react-icons/hi";
-import { downloadCSV, formatCurrency } from "../utils/helpers";
+import { useEffect, useState } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import { Banknote, Download, Pencil, RefreshCw } from 'lucide-react';
+import { fetchPayroll, generatePayroll, markPaid, updateDeductions } from '../features/payrollSlice';
+import { Badge, ConfirmDialog, DataTable, Field, Modal, PageHeader, Select, StatCard } from '../components/ui';
+import { downloadCsv, formatDate, formatINR, monthName, monthOptions, todayISO, yearOptions } from '../utils/format';
 
-const Payroll = () => {
-  const {
-    payroll,
-    guards,
-    fetchPayroll,
-    fetchGuards,
-    addPayroll,
-    updatePayroll,
-    processPayroll,
-  } = useApp();
-  const [loading, setLoading] = useState(true);
-  const [submitLoading, setSubmitLoading] = useState(false);
-  const [showModal, setShowModal] = useState(false);
-  const [showProcessConfirm, setShowProcessConfirm] = useState(false);
-  const [selectedRecord, setSelectedRecord] = useState(null);
-  const [selectedIds, setSelectedIds] = useState([]);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [monthFilter, setMonthFilter] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+const MODES = ['Bank transfer', 'UPI', 'Cash', 'Cheque'].map((v) => ({ value: v, label: v }));
 
-  useEffect(() => {
-    loadData();
-  }, []);
+export default function Payroll() {
+  const dispatch = useDispatch();
+  const { items, totals, loading, saving } = useSelector((s) => s.payroll);
+  const now = new Date();
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [year, setYear] = useState(now.getFullYear());
+  const [status, setStatus] = useState('');
+  const [search, setSearch] = useState('');
+  const [confirmGen, setConfirmGen] = useState(false);
+  const [deduct, setDeduct] = useState(null);
+  const [pay, setPay] = useState(null);
 
-  const loadData = async () => {
-    setLoading(true);
-    await Promise.all([fetchPayroll(), fetchGuards()]);
-    setLoading(false);
+  const load = () => dispatch(fetchPayroll({ month, year, status: status || undefined, search: search || undefined }));
+  useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [month, year, status, search]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const generate = async () => {
+    try { await dispatch(generatePayroll({ month, year })).unwrap(); setConfirmGen(false); load(); } catch { setConfirmGen(false); }
+  };
+  const saveDeduct = async (e) => {
+    e.preventDefault();
+    try { await dispatch(updateDeductions({ id: deduct.PaymentId, body: { advanceDeduction: deduct.AdvanceDeduction, otherDeduction: deduct.OtherDeduction, remarks: deduct.Remarks } })).unwrap(); setDeduct(null); load(); } catch { /* toast shown */ }
+  };
+  const savePay = async (e) => {
+    e.preventDefault();
+    try { await dispatch(markPaid({ id: pay.PaymentId, body: { paidOn: pay.paidOn, paymentMode: pay.paymentMode, referenceNo: pay.referenceNo } })).unwrap(); setPay(null); load(); } catch { /* toast shown */ }
   };
 
-  const filteredPayroll = useMemo(() => {
-    return payroll.filter((record) => {
-      const matchesSearch = record.guardName
-        ?.toLowerCase()
-        .includes(searchQuery.toLowerCase());
-      const matchesStatus =
-        statusFilter === "all" || record.status === statusFilter;
-      const matchesMonth = !monthFilter || record.month === monthFilter;
-      return matchesSearch && matchesStatus && matchesMonth;
-    });
-  }, [payroll, searchQuery, statusFilter, monthFilter]);
+  const exportCsv = () => downloadCsv(`payroll-${year}-${String(month).padStart(2, '0')}.csv`, items, [
+    { header: 'Code', value: (r) => r.GuardCode }, { header: 'Guard', value: (r) => r.FullName },
+    { header: 'Bank', value: (r) => r.BankName }, { header: 'Account', value: (r) => r.AccountNo }, { header: 'IFSC', value: (r) => r.IfscCode },
+    { header: 'Payable days', value: (r) => r.PayableDays }, { header: 'Gross', value: (r) => r.GrossAmount },
+    { header: 'PF', value: (r) => r.PfAmount }, { header: 'ESI', value: (r) => r.EsiAmount },
+    { header: 'Advance', value: (r) => r.AdvanceDeduction }, { header: 'Other', value: (r) => r.OtherDeduction },
+    { header: 'Net pay', value: (r) => r.NetAmount }, { header: 'Status', value: (r) => r.Status },
+  ]);
 
-  const paginatedPayroll = useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage;
-    return filteredPayroll.slice(start, start + itemsPerPage);
-  }, [filteredPayroll, currentPage]);
+  const net = deduct && (Number(deduct.GrossAmount) - Number(deduct.PfAmount) - Number(deduct.EsiAmount) - (Number(deduct.AdvanceDeduction) || 0) - (Number(deduct.OtherDeduction) || 0));
 
-  const totalPages = Math.ceil(filteredPayroll.length / itemsPerPage);
-
-  const handleAdd = () => {
-    setSelectedRecord(null);
-    setShowModal(true);
-  };
-
-  const handleEdit = (record) => {
-    setSelectedRecord(record);
-    setShowModal(true);
-  };
-
-  const handleSubmit = async (data) => {
-    setSubmitLoading(true);
-    try {
-      if (selectedRecord) {
-        await updatePayroll(selectedRecord.id, data);
-      } else {
-        await addPayroll(data);
-      }
-      setShowModal(false);
-      setSelectedRecord(null);
-    } finally {
-      setSubmitLoading(false);
-    }
-  };
-
-  const handleProcessPayroll = async () => {
-    setSubmitLoading(true);
-    try {
-      await processPayroll(selectedIds);
-      setShowProcessConfirm(false);
-      setSelectedIds([]);
-    } finally {
-      setSubmitLoading(false);
-    }
-  };
-
-  const handleExport = () => {
-    const exportData = filteredPayroll.map((p) => ({
-      Guard: p.guardName,
-      Month: p.month,
-      "Base Salary": formatCurrency(p.baseSalary),
-      Overtime: formatCurrency(p.overtime),
-      Bonus: formatCurrency(p.bonus),
-      Deductions: formatCurrency(p.deductions),
-      "Net Salary": formatCurrency(p.netSalary),
-      Status: p.status,
-      "Paid Date": p.paidDate || "-",
-    }));
-    downloadCSV(exportData, "payroll");
-  };
-
-  // Stats
-  const stats = useMemo(
-    () => ({
-      totalRecords: payroll.length,
-      pendingAmount: payroll
-        .filter((p) => p.status === "pending")
-        .reduce((sum, p) => sum + p.netSalary, 0),
-      paidAmount: payroll
-        .filter((p) => p.status === "paid")
-        .reduce((sum, p) => sum + p.netSalary, 0),
-      pendingCount: payroll.filter((p) => p.status === "pending").length,
-    }),
-    [payroll],
-  );
-
-  // Get unique months
-  const months = useMemo(() => {
-    const uniqueMonths = [...new Set(payroll.map((p) => p.month))];
-    return uniqueMonths.map((m) => ({ value: m, label: m }));
-  }, [payroll]);
-
-  if (loading) {
-    return <PageLoader />;
-  }
+  const columns = [
+    { header: 'Guard', render: (r) => <div><p className="font-medium">{r.FullName}</p><p className="text-xs text-steel">{r.GuardCode}</p></div> },
+    { header: 'Days', key: 'PayableDays' },
+    { header: 'Salary', render: (r) => formatINR(r.MonthlySalary) },
+    { header: 'Gross', render: (r) => formatINR(r.GrossAmount) },
+    { header: 'Deductions', render: (r) => formatINR(Number(r.PfAmount) + Number(r.EsiAmount) + Number(r.AdvanceDeduction) + Number(r.OtherDeduction)) },
+    { header: 'Net pay', render: (r) => <strong>{formatINR(r.NetAmount)}</strong> },
+    { header: 'Status', render: (r) => <Badge tone={r.Status === 'Paid' ? 'ok' : 'warn'}>{r.Status === 'Paid' ? `Paid ${formatDate(r.PaidOn)}` : 'Pending'}</Badge> },
+    {
+      header: 'Actions', className: 'text-right',
+      render: (r) => r.Status === 'Pending' && (
+        <div className="flex justify-end gap-1.5">
+          <button className="btn-ghost btn-sm" onClick={() => setDeduct({ ...r })}><Pencil size={14} /> Deductions</button>
+          <button className="btn-primary btn-sm" onClick={() => setPay({ ...r, paidOn: todayISO(), paymentMode: 'Bank transfer', referenceNo: '' })}><Banknote size={14} /> Pay</button>
+        </div>
+      ),
+    },
+  ];
 
   return (
-    <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            Payroll Management
-          </h1>
-          <p className="text-gray-500">Manage guard salaries and payments</p>
-        </div>
-        <div className="flex gap-2">
-          {selectedIds.length > 0 && (
-            <Button
-              variant="success"
-              onClick={() => setShowProcessConfirm(true)}
-            >
-              <HiOutlineCheckCircle className="w-5 h-5" />
-              Process Selected ({selectedIds.length})
-            </Button>
-          )}
-          <Button onClick={handleAdd}>
-            <HiOutlinePlus className="w-5 h-5" />
-            Add Payroll
-          </Button>
-        </div>
+    <>
+      <PageHeader title="Payroll" subtitle="Monthly salary calculated from attendance">
+        <button className="btn-ghost" onClick={exportCsv} disabled={!items.length}><Download size={16} /> Export CSV</button>
+        <button className="btn-accent" onClick={() => setConfirmGen(true)}><RefreshCw size={16} /> Generate payroll</button>
+      </PageHeader>
+
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <div><label className="label">Month</label><Select value={month} onChange={(v) => setMonth(Number(v))} options={monthOptions} /></div>
+        <div><label className="label">Year</label><Select value={year} onChange={(v) => setYear(Number(v))} options={yearOptions()} /></div>
+        <div><label className="label">Status</label><Select value={status} onChange={setStatus} placeholder="All" options={[{ value: 'Pending', label: 'Pending' }, { value: 'Paid', label: 'Paid' }]} /></div>
+        <div className="min-w-[200px] flex-1 sm:max-w-xs"><label className="label">Search</label><input className="input" placeholder="Guard name or code" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="text-center">
-          <p className="text-sm text-gray-500">Total Records</p>
-          <p className="text-2xl font-bold text-gray-900">
-            {stats.totalRecords}
-          </p>
-        </Card>
-        <Card className="text-center">
-          <p className="text-sm text-gray-500">Pending Payments</p>
-          <p className="text-2xl font-bold text-yellow-600">
-            {stats.pendingCount}
-          </p>
-        </Card>
-        <Card className="text-center">
-          <p className="text-sm text-gray-500">Pending Amount</p>
-          <p className="text-2xl font-bold text-red-600">
-            {formatCurrency(stats.pendingAmount)}
-          </p>
-        </Card>
-        <Card className="text-center">
-          <p className="text-sm text-gray-500">Paid Amount</p>
-          <p className="text-2xl font-bold text-green-600">
-            {formatCurrency(stats.paidAmount)}
-          </p>
-        </Card>
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard label="Guards" value={totals.count} />
+        <StatCard label="Total net pay" value={formatINR(totals.net)} />
+        <StatCard label="Paid" value={formatINR(totals.paid)} />
+        <StatCard label="Pending" value={formatINR(totals.pending)} tone={totals.pending ? 'warn' : undefined} />
       </div>
 
-      {/* Filters & Actions */}
-      <Card>
-        <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
-          <div className="flex flex-col sm:flex-row gap-4 flex-1 w-full lg:w-auto">
-            <SearchBar
-              value={searchQuery}
-              onChange={setSearchQuery}
-              placeholder="Search by guard name..."
-              className="w-full sm:w-64"
-            />
-            <select
-              value={monthFilter}
-              onChange={(e) => setMonthFilter(e.target.value)}
-              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-            >
-              <option value="">All Months</option>
-              {months.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-            >
-              <option value="all">All Status</option>
-              <option value="pending">Pending</option>
-              <option value="paid">Paid</option>
-            </select>
-          </div>
+      <DataTable columns={columns} rows={items} loading={loading} rowKey="PaymentId" empty={`No payroll for ${monthName(month)} ${year}. Use Generate payroll after marking attendance.`} />
 
-          <Button variant="secondary" onClick={handleExport}>
-            <HiOutlineDownload className="w-5 h-5" />
-            Export
-          </Button>
-        </div>
-      </Card>
-
-      {/* Results */}
-      {filteredPayroll.length === 0 ? (
-        <Card>
-          <EmptyState
-            icon={HiOutlineCash}
-            title="No payroll records found"
-            description={
-              searchQuery || statusFilter !== "all" || monthFilter
-                ? "Try adjusting your search or filter criteria"
-                : "Get started by adding payroll records"
-            }
-            actionLabel="Add Payroll"
-            onAction={handleAdd}
-          />
-        </Card>
-      ) : (
-        <Card padding={false}>
-          <PayrollTable
-            payroll={paginatedPayroll}
-            onEdit={handleEdit}
-            onPay={(ids) => {
-              setSelectedIds(ids);
-              setShowProcessConfirm(true);
-            }}
-            selectedIds={selectedIds}
-            onSelect={setSelectedIds}
-          />
-          <div className="p-4 border-t border-gray-100">
-            <Pagination
-              currentPage={currentPage}
-              totalPages={totalPages}
-              onPageChange={setCurrentPage}
-              totalItems={filteredPayroll.length}
-              itemsPerPage={itemsPerPage}
-            />
-          </div>
-        </Card>
+      {confirmGen && (
+        <ConfirmDialog title="Generate payroll" confirmLabel="Generate" busy={saving} onClose={() => setConfirmGen(false)} onConfirm={generate}
+          message={`Calculate salary for ${monthName(month)} ${year} from attendance. Pending rows are refreshed (advance and other deductions are kept). Paid rows are not changed.`} />
       )}
 
-      {/* Add/Edit Modal */}
-      <Modal
-        isOpen={showModal}
-        onClose={() => {
-          setShowModal(false);
-          setSelectedRecord(null);
-        }}
-        title={selectedRecord ? "Edit Payroll" : "Add Payroll Record"}
-        size="lg"
-      >
-        <PayrollForm
-          payroll={selectedRecord}
-          guards={guards}
-          onSubmit={handleSubmit}
-          onCancel={() => {
-            setShowModal(false);
-            setSelectedRecord(null);
-          }}
-          loading={submitLoading}
-        />
-      </Modal>
+      {deduct && (
+        <Modal title={`Deductions - ${deduct.FullName}`} onClose={() => setDeduct(null)} size="sm">
+          <form onSubmit={saveDeduct} className="space-y-4">
+            <p className="text-sm text-steel">Gross {formatINR(deduct.GrossAmount)}, PF {formatINR(deduct.PfAmount)}, ESI {formatINR(deduct.EsiAmount)}</p>
+            <Field label="Advance taken (INR)"><input type="number" min="0" step="0.01" className="input" value={deduct.AdvanceDeduction} onChange={(e) => setDeduct({ ...deduct, AdvanceDeduction: e.target.value })} /></Field>
+            <Field label="Other deduction (INR)"><input type="number" min="0" step="0.01" className="input" value={deduct.OtherDeduction} onChange={(e) => setDeduct({ ...deduct, OtherDeduction: e.target.value })} /></Field>
+            <Field label="Remarks"><input className="input" value={deduct.Remarks || ''} onChange={(e) => setDeduct({ ...deduct, Remarks: e.target.value })} /></Field>
+            <p className="text-sm">Net pay: <strong>{formatINR(Math.max(net, 0))}</strong></p>
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-ghost" onClick={() => setDeduct(null)}>Cancel</button>
+              <button className="btn-primary" disabled={saving}>Save</button>
+            </div>
+          </form>
+        </Modal>
+      )}
 
-      {/* Process Confirmation */}
-      <ConfirmDialog
-        isOpen={showProcessConfirm}
-        onClose={() => {
-          setShowProcessConfirm(false);
-        }}
-        onConfirm={handleProcessPayroll}
-        title="Process Payroll"
-        message={`Are you sure you want to process payment for ${selectedIds.length} record(s)? This will mark them as paid.`}
-        confirmText="Process Payment"
-        variant="warning"
-        loading={submitLoading}
-      />
-    </div>
+      {pay && (
+        <Modal title={`Pay ${pay.FullName}`} onClose={() => setPay(null)} size="sm">
+          <form onSubmit={savePay} className="space-y-4">
+            <p className="text-2xl font-semibold">{formatINR(pay.NetAmount)}</p>
+            <Field label="Payment mode" required><Select value={pay.paymentMode} onChange={(v) => setPay({ ...pay, paymentMode: v })} options={MODES} /></Field>
+            <Field label="Paid on" required><input type="date" className="input" max={todayISO()} value={pay.paidOn} onChange={(e) => setPay({ ...pay, paidOn: e.target.value })} required /></Field>
+            <Field label="Reference / UTR number"><input className="input" value={pay.referenceNo} onChange={(e) => setPay({ ...pay, referenceNo: e.target.value })} /></Field>
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-ghost" onClick={() => setPay(null)}>Cancel</button>
+              <button className="btn-primary" disabled={saving}>Mark as paid</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </>
   );
-};
-
-export default Payroll;
+}

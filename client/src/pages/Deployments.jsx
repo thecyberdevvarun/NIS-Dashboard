@@ -1,284 +1,130 @@
-import { useState, useEffect, useMemo } from "react";
-import { useApp } from "../context/AppContext";
-import Card from "../components/common/Card";
-import Button from "../components/common/Button";
-import Modal from "../components/common/Modal";
-import SearchBar from "../components/common/SearchBar";
-import Pagination from "../components/common/Pagination";
-import EmptyState from "../components/common/EmptyState";
-import ConfirmDialog from "../components/common/ConfirmDialog";
-import DeploymentForm from "../components/deployments/DeploymentForm";
-import DeploymentTable from "../components/deployments/DeploymentTable";
-import { PageLoader } from "../components/common/Loader";
-import {
-  HiOutlinePlus,
-  HiOutlineDownload,
-  HiOutlineLocationMarker,
-} from "react-icons/hi";
-import { downloadCSV } from "../utils/helpers";
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { useDispatch, useSelector } from 'react-redux';
+import { ArrowLeftRight, Plus, Search, StopCircle } from 'lucide-react';
+import { assignGuard, endDeployment, fetchDeployments } from '../features/deploymentsSlice';
+import { clients, guards, sites } from '../features/entities';
+import { ConfirmDialog, DataTable, Field, Modal, PageHeader, Pagination, Select } from '../components/ui';
+import { formatDate, todayISO } from '../utils/format';
 
-const Deployments = () => {
-  const {
-    deployments,
-    guards,
-    clients,
-    fetchDeployments,
-    fetchGuards,
-    fetchClients,
-    addDeployment,
-    updateDeployment,
-    deleteDeployment,
-  } = useApp();
-  const [loading, setLoading] = useState(true);
-  const [submitLoading, setSubmitLoading] = useState(false);
-  const [showModal, setShowModal] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [selectedDeployment, setSelectedDeployment] = useState(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [shiftFilter, setShiftFilter] = useState("all");
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+const SHIFTS = ['Day', 'Night', 'General'].map((v) => ({ value: v, label: v }));
 
+export default function Deployments() {
+  const dispatch = useDispatch();
+  const location = useLocation();
+  const isAdmin = useSelector((s) => s.auth.user?.role === 'Admin');
+  const { items, total, page, pageSize, loading, saving } = useSelector((s) => s.deployments);
+  const guardOpts = useSelector((s) => s.guards.options);
+  const siteOpts = useSelector((s) => s.sites.options);
+  const clientOpts = useSelector((s) => s.clients.options);
+
+  const [search, setSearch] = useState('');
+  const [q, setQ] = useState('');
+  const [clientId, setClientId] = useState('');
+  const [pageNo, setPageNo] = useState(1);
+  const [form, setForm] = useState(null);       // assign / transfer modal
+  const [ending, setEnding] = useState(null);
+
+  const loadOptions = useCallback(() => {
+    dispatch(guards.actions.fetchOptions());
+    dispatch(sites.actions.fetchOptions());
+    dispatch(clients.actions.fetchOptions());
+  }, [dispatch]);
+
+  useEffect(() => { loadOptions(); }, [loadOptions]);
+  useEffect(() => { const t = setTimeout(() => { setQ(search); setPageNo(1); }, 350); return () => clearTimeout(t); }, [search]);
+
+  const load = useCallback(() => {
+    dispatch(fetchDeployments({ page: pageNo, search: q || undefined, clientId: clientId || undefined, isActive: 1 }));
+  }, [dispatch, pageNo, q, clientId]);
+  useEffect(() => { load(); }, [load]);
+
+  // arriving from the Guards page with a guard pre-selected
   useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
-    setLoading(true);
-    await Promise.all([fetchDeployments(), fetchGuards(), fetchClients()]);
-    setLoading(false);
-  };
-
-  const filteredDeployments = useMemo(() => {
-    return deployments.filter((deployment) => {
-      const matchesSearch =
-        deployment.guardName
-          ?.toLowerCase()
-          .includes(searchQuery.toLowerCase()) ||
-        deployment.clientName
-          ?.toLowerCase()
-          .includes(searchQuery.toLowerCase()) ||
-        deployment.location?.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesShift =
-        shiftFilter === "all" || deployment.shift === shiftFilter;
-      return matchesSearch && matchesShift;
-    });
-  }, [deployments, searchQuery, shiftFilter]);
-
-  const paginatedDeployments = useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage;
-    return filteredDeployments.slice(start, start + itemsPerPage);
-  }, [filteredDeployments, currentPage]);
-
-  const totalPages = Math.ceil(filteredDeployments.length / itemsPerPage);
-
-  const handleAdd = () => {
-    setSelectedDeployment(null);
-    setShowModal(true);
-  };
-
-  const handleEdit = (deployment) => {
-    setSelectedDeployment(deployment);
-    setShowModal(true);
-  };
-
-  const handleDelete = (deployment) => {
-    setSelectedDeployment(deployment);
-    setShowDeleteConfirm(true);
-  };
-
-  const handleSubmit = async (data) => {
-    setSubmitLoading(true);
-    try {
-      if (selectedDeployment) {
-        await updateDeployment(selectedDeployment.id, data);
-      } else {
-        await addDeployment(data);
-      }
-      setShowModal(false);
-      setSelectedDeployment(null);
-    } finally {
-      setSubmitLoading(false);
+    if (location.state?.guardId) {
+      setForm({ guardId: String(location.state.guardId), siteId: '', shift: 'Day', startDate: todayISO() });
+      window.history.replaceState({}, '');
     }
-  };
+  }, [location.state]);
 
-  const handleConfirmDelete = async () => {
-    setSubmitLoading(true);
-    try {
-      await deleteDeployment(selectedDeployment.id);
-      setShowDeleteConfirm(false);
-      setSelectedDeployment(null);
-    } finally {
-      setSubmitLoading(false);
-    }
-  };
-
-  const handleExport = () => {
-    const exportData = filteredDeployments.map((d) => ({
-      ID: `DEP-${d.id.toString().padStart(4, "0")}`,
-      Guard: d.guardName,
-      Client: d.clientName,
-      Location: d.location,
-      Shift: d.shift,
-      Timing: d.shiftTime,
-      "Start Date": d.startDate,
-      Status: d.status,
-    }));
-    downloadCSV(exportData, "deployments");
-  };
-
-  // Stats
-  const stats = useMemo(
-    () => ({
-      total: deployments.length,
-      active: deployments.filter((d) => d.status === "active").length,
-      day: deployments.filter((d) => d.shift === "day").length,
-      night: deployments.filter((d) => d.shift === "night").length,
-    }),
-    [deployments],
+  const guardSelect = useMemo(
+    () => guardOpts.map((g) => ({ value: g.GuardId, label: `${g.GuardCode} - ${g.FullName}${g.SiteName ? ` (now at ${g.SiteName})` : ' (not assigned)'}` })),
+    [guardOpts]
   );
+  const siteSelect = useMemo(() => siteOpts.map((s) => ({ value: s.SiteId, label: `${s.CompanyName} - ${s.SiteName}` })), [siteOpts]);
+  const clientSelect = useMemo(() => clientOpts.map((c) => ({ value: c.ClientId, label: c.CompanyName })), [clientOpts]);
 
-  if (loading) {
-    return <PageLoader />;
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!form.guardId || !form.siteId || !form.startDate) return;
+    try {
+      await dispatch(assignGuard({ ...form, guardId: Number(form.guardId), siteId: Number(form.siteId) })).unwrap();
+      setForm(null); load(); loadOptions();
+    } catch { /* toast shown */ }
+  };
+
+  const confirmEnd = async () => {
+    try { await dispatch(endDeployment({ id: ending.DeploymentId, endDate: todayISO() })).unwrap(); setEnding(null); load(); loadOptions(); } catch { /* toast shown */ }
+  };
+
+  const columns = [
+    { header: 'Company', key: 'CompanyName' },
+    { header: 'Site', key: 'SiteName' },
+    { header: 'Guard', render: (r) => <div><p className="font-medium">{r.FullName}</p><p className="text-xs text-steel">{r.GuardCode} - {r.Phone}</p></div> },
+    { header: 'Shift', key: 'Shift' },
+    { header: 'Since', render: (r) => formatDate(r.StartDate) },
+  ];
+  if (isAdmin) {
+    columns.push({
+      header: 'Actions', className: 'text-right',
+      render: (r) => (
+        <div className="flex justify-end gap-1.5">
+          <button className="btn-ghost btn-sm" onClick={() => setForm({ guardId: String(r.GuardId), siteId: '', shift: r.Shift, startDate: todayISO() })}><ArrowLeftRight size={14} /> Transfer</button>
+          <button className="btn-ghost btn-sm text-alert" onClick={() => setEnding(r)}><StopCircle size={14} /> End</button>
+        </div>
+      ),
+    });
   }
 
   return (
-    <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Deployments</h1>
-          <p className="text-gray-500">Manage guard assignments and shifts</p>
+    <>
+      <PageHeader title="Deployments" subtitle="Which guard is posted at which company and site">
+        {isAdmin && <button className="btn-primary" onClick={() => setForm({ guardId: '', siteId: '', shift: 'Day', startDate: todayISO() })}><Plus size={16} /> Assign guard</button>}
+      </PageHeader>
+
+      <div className="mb-3 flex flex-wrap gap-2">
+        <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+          <Search size={16} className="absolute left-3 top-2.5 text-steel" />
+          <input className="input pl-9" placeholder="Search guard, site or company" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <Button onClick={handleAdd}>
-          <HiOutlinePlus className="w-5 h-5" />
-          New Deployment
-        </Button>
+        <Select className="w-auto min-w-[180px]" value={clientId} placeholder="All clients" options={clientSelect} onChange={(v) => { setClientId(v); setPageNo(1); }} />
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="text-center">
-          <p className="text-sm text-gray-500">Total Deployments</p>
-          <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
-        </Card>
-        <Card className="text-center">
-          <p className="text-sm text-gray-500">Active</p>
-          <p className="text-2xl font-bold text-green-600">{stats.active}</p>
-        </Card>
-        <Card className="text-center">
-          <p className="text-sm text-gray-500">Day Shifts</p>
-          <p className="text-2xl font-bold text-blue-600">{stats.day}</p>
-        </Card>
-        <Card className="text-center">
-          <p className="text-sm text-gray-500">Night Shifts</p>
-          <p className="text-2xl font-bold text-purple-600">{stats.night}</p>
-        </Card>
-      </div>
+      <DataTable columns={columns} rows={items} loading={loading} rowKey="DeploymentId" empty="No active deployments" />
+      <Pagination page={page} pageSize={pageSize} total={total} onPage={setPageNo} />
 
-      {/* Filters & Actions */}
-      <Card>
-        <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
-          <div className="flex flex-col sm:flex-row gap-4 flex-1 w-full lg:w-auto">
-            <SearchBar
-              value={searchQuery}
-              onChange={setSearchQuery}
-              placeholder="Search deployments..."
-              className="w-full sm:w-80"
-            />
-            <select
-              value={shiftFilter}
-              onChange={(e) => setShiftFilter(e.target.value)}
-              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-            >
-              <option value="all">All Shifts</option>
-              <option value="day">Day Shift</option>
-              <option value="evening">Evening Shift</option>
-              <option value="night">Night Shift</option>
-            </select>
-          </div>
-
-          <Button variant="secondary" onClick={handleExport}>
-            <HiOutlineDownload className="w-5 h-5" />
-            Export
-          </Button>
-        </div>
-      </Card>
-
-      {/* Results */}
-      {filteredDeployments.length === 0 ? (
-        <Card>
-          <EmptyState
-            icon={HiOutlineLocationMarker}
-            title="No deployments found"
-            description={
-              searchQuery || shiftFilter !== "all"
-                ? "Try adjusting your search or filter criteria"
-                : "Get started by creating your first deployment"
-            }
-            actionLabel={
-              !searchQuery && shiftFilter === "all" ? "New Deployment" : null
-            }
-            onAction={handleAdd}
-          />
-        </Card>
-      ) : (
-        <Card padding={false}>
-          <DeploymentTable
-            deployments={paginatedDeployments}
-            onEdit={handleEdit}
-            onDelete={handleDelete}
-          />
-          <div className="p-4 border-t border-gray-100">
-            <Pagination
-              currentPage={currentPage}
-              totalPages={totalPages}
-              onPageChange={setCurrentPage}
-              totalItems={filteredDeployments.length}
-              itemsPerPage={itemsPerPage}
-            />
-          </div>
-        </Card>
+      {form && (
+        <Modal title="Assign guard to site" onClose={() => setForm(null)}>
+          <form onSubmit={submit} className="space-y-4">
+            <Field label="Guard" required><Select value={form.guardId} onChange={(v) => setForm({ ...form, guardId: v })} options={guardSelect} placeholder="Select guard" required /></Field>
+            <Field label="Site" required><Select value={form.siteId} onChange={(v) => setForm({ ...form, siteId: v })} options={siteSelect} placeholder="Select site" required /></Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Shift"><Select value={form.shift} onChange={(v) => setForm({ ...form, shift: v })} options={SHIFTS} /></Field>
+              <Field label="Start date" required><input type="date" className="input" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} required /></Field>
+            </div>
+            <p className="text-xs text-steel">If the guard is already posted somewhere, that posting ends the day before the start date.</p>
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-ghost" onClick={() => setForm(null)}>Cancel</button>
+              <button className="btn-primary" disabled={saving}>{saving ? 'Saving...' : 'Assign'}</button>
+            </div>
+          </form>
+        </Modal>
       )}
 
-      {/* Add/Edit Modal */}
-      <Modal
-        isOpen={showModal}
-        onClose={() => {
-          setShowModal(false);
-          setSelectedDeployment(null);
-        }}
-        title={selectedDeployment ? "Edit Deployment" : "Create New Deployment"}
-        size="lg"
-      >
-        <DeploymentForm
-          deployment={selectedDeployment}
-          guards={guards}
-          clients={clients}
-          onSubmit={handleSubmit}
-          onCancel={() => {
-            setShowModal(false);
-            setSelectedDeployment(null);
-          }}
-          loading={submitLoading}
-        />
-      </Modal>
-
-      {/* Delete Confirmation */}
-      <ConfirmDialog
-        isOpen={showDeleteConfirm}
-        onClose={() => {
-          setShowDeleteConfirm(false);
-          setSelectedDeployment(null);
-        }}
-        onConfirm={handleConfirmDelete}
-        title="Delete Deployment"
-        message="Are you sure you want to delete this deployment? This action cannot be undone."
-        confirmText="Delete"
-        loading={submitLoading}
-      />
-    </div>
+      {ending && (
+        <ConfirmDialog title="End deployment" danger confirmLabel="End deployment" busy={saving} onClose={() => setEnding(null)} onConfirm={confirmEnd}
+          message={`${ending.FullName} will no longer be posted at ${ending.SiteName}. The guard will show as not assigned until you give a new site.`} />
+      )}
+    </>
   );
-};
-
-export default Deployments;
+}

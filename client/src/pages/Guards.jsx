@@ -1,349 +1,83 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { useApp } from "../context/AppContext";
-import { usePermissions } from "../hooks/usePermissions";
-import PermissionGate from "../components/auth/PermissionGate";
-import { PERMISSIONS } from "../config/roles";
-import Card from "../components/common/Card";
-import Button from "../components/common/Button";
-import Modal from "../components/common/Modal";
-import SearchBar from "../components/common/SearchBar";
-import Pagination from "../components/common/Pagination";
-import EmptyState from "../components/common/EmptyState";
-import ConfirmDialog from "../components/common/ConfirmDialog";
-import GuardForm from "../components/guards/GuardForm";
-import GuardTable from "../components/guards/GuardTable";
-import GuardCard from "../components/guards/GuardCard";
-import GuardDetails from "../components/guards/GuardDetails";
-import { PageLoader } from "../components/common/Loader";
-import {
-  HiOutlinePlus,
-  HiOutlineViewGrid,
-  HiOutlineViewList,
-  HiOutlineDownload,
-  HiOutlineUserGroup,
-} from "react-icons/hi";
-import { downloadCSV } from "../utils/helpers";
+import { useEffect, useMemo } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useDispatch, useSelector } from 'react-redux';
+import { Eye, Route } from 'lucide-react';
+import CrudPage from '../components/CrudPage';
+import { Badge } from '../components/ui';
+import { clients, contractors, guards } from '../features/entities';
+import { formatINR } from '../utils/format';
 
-const Guards = () => {
-  const { guards, fetchGuards, addGuard, updateGuard, deleteGuard } = useApp();
-  const permissions = usePermissions();
-
-  const [loading, setLoading] = useState(true);
-  const [submitLoading, setSubmitLoading] = useState(false);
-  const [showModal, setShowModal] = useState(false);
-  const [showDetails, setShowDetails] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [selectedGuard, setSelectedGuard] = useState(null);
-  const [viewMode, setViewMode] = useState("table");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+export default function Guards() {
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const contractorOptions = useSelector((s) => s.contractors.options);
+  const clientOptions = useSelector((s) => s.clients.options);
+  const isAdmin = useSelector((s) => s.auth.user?.role === 'Admin');
 
   useEffect(() => {
-    loadGuards();
-  }, []);
+    dispatch(contractors.actions.fetchOptions());
+    dispatch(clients.actions.fetchOptions());
+  }, [dispatch]);
 
-  const loadGuards = async () => {
-    setLoading(true);
-    await fetchGuards();
-    setLoading(false);
-  };
+  const cOpts = useMemo(() => contractorOptions.map((c) => ({ value: c.ContractorId, label: c.Name })), [contractorOptions]);
+  const clOpts = useMemo(() => clientOptions.map((c) => ({ value: c.ClientId, label: c.CompanyName })), [clientOptions]);
 
-  const filteredGuards = useMemo(() => {
-    return guards.filter((guard) => {
-      const matchesSearch =
-        guard.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        guard.phone.includes(searchQuery) ||
-        guard.email?.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus =
-        statusFilter === "all" || guard.status === statusFilter;
-      return matchesSearch && matchesStatus;
-    });
-  }, [guards, searchQuery, statusFilter]);
+  const fields = useMemo(() => [
+    { type: 'section', label: 'Personal details' },
+    { name: 'FullName', label: 'Full name', required: true },
+    { name: 'FatherName', label: "Father's name" },
+    { name: 'Phone', label: 'Mobile', required: true },
+    { name: 'AltPhone', label: 'Alternate mobile' },
+    { name: 'Gender', label: 'Gender', type: 'select', options: [{ value: 'Male', label: 'Male' }, { value: 'Female', label: 'Female' }, { value: 'Other', label: 'Other' }] },
+    { name: 'DateOfBirth', label: 'Date of birth', type: 'date' },
+    { name: 'Address', label: 'Address', type: 'textarea', span: 2 },
+    { name: 'EmergencyContactName', label: 'Emergency contact name' },
+    { name: 'EmergencyContactPhone', label: 'Emergency contact mobile' },
+    { type: 'section', label: 'Job and salary' },
+    { name: 'JoiningDate', label: 'Joining date', type: 'date', required: true },
+    { name: 'MonthlySalary', label: 'Monthly salary (INR)', type: 'number', required: true },
+    { name: 'ContractorId', label: 'Contractor', type: 'select', options: cOpts },
+    { name: 'PfApplicable', label: 'Provident fund', type: 'checkbox', hint: 'PF applicable' },
+    { name: 'EsiApplicable', label: 'ESI', type: 'checkbox', hint: 'ESI applicable' },
+    { type: 'section', label: 'Identity and bank' },
+    { name: 'AadhaarNo', label: 'Aadhaar number' },
+    { name: 'PanNo', label: 'PAN' },
+    { name: 'UanNo', label: 'UAN' },
+    { name: 'EsicNo', label: 'ESIC number' },
+    { name: 'BankName', label: 'Bank name' },
+    { name: 'AccountNo', label: 'Account number' },
+    { name: 'IfscCode', label: 'IFSC code' },
+    { name: 'IsActive', label: 'Status', type: 'checkbox', hint: 'Active guard', editOnly: true },
+  ], [cOpts]);
 
-  const paginatedGuards = useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage;
-    return filteredGuards.slice(start, start + itemsPerPage);
-  }, [filteredGuards, currentPage]);
+  const columns = [
+    { header: 'Code', key: 'GuardCode' },
+    { header: 'Guard', render: (r) => <div><Link to={`/guards/${r.GuardId}`} className="font-medium hover:underline">{r.FullName}</Link><p className="text-xs text-steel">{r.Phone}</p></div> },
+    { header: 'Posted at', render: (r) => r.SiteName ? <div><p>{r.SiteName}</p><p className="text-xs text-steel">{r.CompanyName} - {r.Shift}</p></div> : (r.IsActive ? <Badge tone="warn">Not assigned</Badge> : '-') },
+    { header: 'Contractor', render: (r) => r.ContractorName || 'Direct' },
+    { header: 'Salary', render: (r) => formatINR(r.MonthlySalary) },
+    { header: 'Status', render: (r) => <Badge tone={r.IsActive ? 'ok' : 'neutral'}>{r.IsActive ? 'Active' : 'Inactive'}</Badge> },
+  ];
 
-  const totalPages = Math.ceil(filteredGuards.length / itemsPerPage);
-
-  const handleAdd = () => {
-    if (!permissions.canCreateGuard) return;
-    setSelectedGuard(null);
-    setShowModal(true);
-  };
-
-  const handleEdit = (guard) => {
-    if (!permissions.canEditGuard) return;
-    setSelectedGuard(guard);
-    setShowModal(true);
-    setShowDetails(false);
-  };
-
-  const handleView = (guard) => {
-    setSelectedGuard(guard);
-    setShowDetails(true);
-  };
-
-  const handleDelete = (guard) => {
-    if (!permissions.canDeleteGuard) return;
-    setSelectedGuard(guard);
-    setShowDeleteConfirm(true);
-  };
-
-  const handleSubmit = async (data) => {
-    setSubmitLoading(true);
-    try {
-      if (selectedGuard) {
-        await updateGuard(selectedGuard.id, data);
-      } else {
-        await addGuard(data);
-      }
-      setShowModal(false);
-      setSelectedGuard(null);
-    } finally {
-      setSubmitLoading(false);
-    }
-  };
-
-  const handleConfirmDelete = async () => {
-    setSubmitLoading(true);
-    try {
-      await deleteGuard(selectedGuard.id);
-      setShowDeleteConfirm(false);
-      setSelectedGuard(null);
-    } finally {
-      setSubmitLoading(false);
-    }
-  };
-
-  const handleExport = () => {
-    if (!permissions.canExportGuards) return;
-    const exportData = filteredGuards.map((g) => ({
-      ID: `GRD-${g.id.toString().padStart(4, "0")}`,
-      Name: g.name,
-      Phone: g.phone,
-      Email: g.email || "",
-      Status: g.status,
-      Salary: g.salary,
-      Experience: `${g.experience} years`,
-      "Assigned To": g.assignedTo || "",
-      "Join Date": g.joinDate,
-    }));
-    downloadCSV(exportData, "guards");
-  };
-
-  if (loading) {
-    return <PageLoader />;
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            Guards Management
-          </h1>
-          <p className="text-gray-500">Manage your security personnel</p>
-        </div>
-        <PermissionGate permissions={[PERMISSIONS.CREATE_GUARD]}>
-          <Button onClick={handleAdd}>
-            <HiOutlinePlus className="w-5 h-5" />
-            Add Guard
-          </Button>
-        </PermissionGate>
-      </div>
-
-      {/* Filters & Actions */}
-      <Card>
-        <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
-          <div className="flex flex-col sm:flex-row gap-4 flex-1 w-full lg:w-auto">
-            <SearchBar
-              value={searchQuery}
-              onChange={setSearchQuery}
-              placeholder="Search guards..."
-              className="w-full sm:w-80"
-            />
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-            >
-              <option value="all">All Status</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-              <option value="on_leave">On Leave</option>
-              <option value="terminated">Terminated</option>
-            </select>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <PermissionGate permissions={[PERMISSIONS.EXPORT_GUARDS]}>
-              <Button variant="secondary" onClick={handleExport}>
-                <HiOutlineDownload className="w-5 h-5" />
-                Export
-              </Button>
-            </PermissionGate>
-            <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden">
-              <button
-                onClick={() => setViewMode("table")}
-                className={`p-2.5 ${viewMode === "table" ? "bg-primary-100 text-primary-600" : "text-gray-500 hover:bg-gray-100"}`}
-              >
-                <HiOutlineViewList className="w-5 h-5" />
-              </button>
-              <button
-                onClick={() => setViewMode("grid")}
-                className={`p-2.5 ${viewMode === "grid" ? "bg-primary-100 text-primary-600" : "text-gray-500 hover:bg-gray-100"}`}
-              >
-                <HiOutlineViewGrid className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      {/* Results Info */}
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-500">
-          Showing {filteredGuards.length} of {guards.length} guards
-        </p>
-      </div>
-
-      {/* Guards List */}
-      {filteredGuards.length === 0 ? (
-        <Card>
-          <EmptyState
-            icon={HiOutlineUserGroup}
-            title="No guards found"
-            description={
-              searchQuery || statusFilter !== "all"
-                ? "Try adjusting your search or filter criteria"
-                : "Get started by adding your first security guard"
-            }
-            actionLabel={
-              permissions.canCreateGuard &&
-              !searchQuery &&
-              statusFilter === "all"
-                ? "Add Guard"
-                : null
-            }
-            onAction={handleAdd}
-          />
-        </Card>
-      ) : viewMode === "table" ? (
-        <Card padding={false}>
-          <GuardTableWithPermissions
-            guards={paginatedGuards}
-            onView={handleView}
-            onEdit={permissions.canEditGuard ? handleEdit : null}
-            onDelete={permissions.canDeleteGuard ? handleDelete : null}
-          />
-          <div className="p-4 border-t border-gray-100">
-            <Pagination
-              currentPage={currentPage}
-              totalPages={totalPages}
-              onPageChange={setCurrentPage}
-              totalItems={filteredGuards.length}
-              itemsPerPage={itemsPerPage}
-            />
-          </div>
-        </Card>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {paginatedGuards.map((guard) => (
-              <GuardCard
-                key={guard.id}
-                guard={guard}
-                onView={handleView}
-                onEdit={permissions.canEditGuard ? handleEdit : null}
-                onDelete={permissions.canDeleteGuard ? handleDelete : null}
-              />
-            ))}
-          </div>
-          <Pagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={setCurrentPage}
-            totalItems={filteredGuards.length}
-            itemsPerPage={itemsPerPage}
-          />
-        </>
+  const rowActions = (r) => (
+    <>
+      <Link to={`/guards/${r.GuardId}`} className="btn-ghost btn-sm" aria-label="View guard"><Eye size={14} /></Link>
+      {isAdmin && r.IsActive && (
+        <button className="btn-ghost btn-sm" aria-label="Assign to site" title="Assign / transfer" onClick={() => navigate('/deployments', { state: { guardId: r.GuardId } })}><Route size={14} /></button>
       )}
-
-      {/* Add/Edit Modal */}
-      <Modal
-        isOpen={showModal}
-        onClose={() => {
-          setShowModal(false);
-          setSelectedGuard(null);
-        }}
-        title={selectedGuard ? "Edit Guard" : "Add New Guard"}
-        size="lg"
-      >
-        <GuardForm
-          guard={selectedGuard}
-          onSubmit={handleSubmit}
-          onCancel={() => {
-            setShowModal(false);
-            setSelectedGuard(null);
-          }}
-          loading={submitLoading}
-        />
-      </Modal>
-
-      {/* View Details Modal */}
-      <Modal
-        isOpen={showDetails}
-        onClose={() => {
-          setShowDetails(false);
-          setSelectedGuard(null);
-        }}
-        title="Guard Details"
-        size="lg"
-      >
-        {selectedGuard && (
-          <GuardDetails
-            guard={selectedGuard}
-            onEdit={permissions.canEditGuard ? handleEdit : null}
-            onClose={() => {
-              setShowDetails(false);
-              setSelectedGuard(null);
-            }}
-          />
-        )}
-      </Modal>
-
-      {/* Delete Confirmation */}
-      <ConfirmDialog
-        isOpen={showDeleteConfirm}
-        onClose={() => {
-          setShowDeleteConfirm(false);
-          setSelectedGuard(null);
-        }}
-        onConfirm={handleConfirmDelete}
-        title="Delete Guard"
-        message={`Are you sure you want to delete "${selectedGuard?.name}"? This action cannot be undone.`}
-        confirmText="Delete"
-        loading={submitLoading}
-      />
-    </div>
+    </>
   );
-};
 
-// Guard Table with permission-based action buttons
-const GuardTableWithPermissions = ({ guards, onView, onEdit, onDelete }) => {
   return (
-    <GuardTable
-      guards={guards}
-      onView={onView}
-      onEdit={onEdit}
-      onDelete={onDelete}
-    />
+    <CrudPage title="Guards" subtitle="All security personnel and where they are posted" noun="guard" stateKey="guards" actions={guards.actions}
+      idKey="GuardId" columns={columns} fields={fields} size="lg" rowActions={rowActions}
+      defaults={{ IsActive: true, PfApplicable: false, EsiApplicable: false, MonthlySalary: '', JoiningDate: new Date().toLocaleDateString('en-CA') }}
+      searchHint="Search name, code, mobile, Aadhaar, site"
+      filters={[
+        { key: 'isActive', label: 'All statuses', options: [{ value: 1, label: 'Active' }, { value: 0, label: 'Inactive' }] },
+        { key: 'unassigned', label: 'All guards', options: [{ value: 1, label: 'Not assigned to a site' }] },
+        { key: 'clientId', label: 'All clients', options: clOpts },
+        { key: 'contractorId', label: 'All contractors', options: cOpts },
+      ]} />
   );
-};
-
-export default Guards;
+}
