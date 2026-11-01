@@ -1,57 +1,192 @@
-const crud = require('../utils/crudFactory');
-const { query, withTransaction } = require('../config/db');
-const asyncHandler = require('../utils/asyncHandler');
-const ApiError = require('../utils/ApiError');
+import crud from "../utils/crudFactory.js";
+import { query, withTransaction } from "../config/db.js";
+import asyncHandler from "../utils/asyncHandler.js";
+import ApiError from "../utils/ApiError.js";
 
 const base = crud({
-  table: 'Guards', alias: 'g', pk: 'GuardId',
-  fields: ['FullName', 'FatherName', 'Phone', 'AltPhone', 'Gender', 'DateOfBirth', 'Address', 'AadhaarNo', 'PanNo',
-    'BankName', 'AccountNo', 'IfscCode', 'UanNo', 'EsicNo', 'PfApplicable', 'EsiApplicable', 'MonthlySalary',
-    'JoiningDate', 'ContractorId', 'EmergencyContactName', 'EmergencyContactPhone', 'IsActive'],
-  required: ['FullName', 'Phone'],
-  joins: `LEFT JOIN Contractors k ON k.ContractorId = g.ContractorId
-    OUTER APPLY (SELECT TOP 1 d.DeploymentId, d.SiteId, d.Shift, d.StartDate FROM Deployments d
-                 WHERE d.GuardId = g.GuardId AND d.IsActive = 1 ORDER BY d.StartDate DESC) cur
-    LEFT JOIN Sites s ON s.SiteId = cur.SiteId
-    LEFT JOIN Clients cl ON cl.ClientId = s.ClientId`,
-  selectCols: `g.*, k.Name AS ContractorName, cur.DeploymentId, cur.SiteId, cur.Shift, cur.StartDate AS DeployedSince,
-    s.SiteName, cl.CompanyName`,
-  searchFields: ['g.FullName', 'g.GuardCode', 'g.Phone', 'g.AadhaarNo', 's.SiteName', 'cl.CompanyName'],
-  filters: { isActive: 'g.IsActive', contractorId: 'g.ContractorId', siteId: 'cur.SiteId', clientId: 's.ClientId' },
-  orderBy: 'g.FullName',
-  extraWhere: (req) => (req.query.unassigned === '1' ? { sql: 'cur.DeploymentId IS NULL AND g.IsActive = 1' } : null),
+  table: "Guards",
+  alias: "g",
+  pk: "GuardId",
+
+  fields: [
+    "FullName",
+    "FatherName",
+    "Phone",
+    "AltPhone",
+    "Gender",
+    "DateOfBirth",
+    "Address",
+    "AadhaarNo",
+    "PanNo",
+    "BankName",
+    "AccountNo",
+    "IfscCode",
+    "UanNo",
+    "EsicNo",
+    "PfApplicable",
+    "EsiApplicable",
+    "MonthlySalary",
+    "JoiningDate",
+    "ContractorId",
+    "EmergencyContactName",
+    "EmergencyContactPhone",
+    "IsActive",
+  ],
+
+  required: ["FullName", "Phone"],
+
+  joins: `
+    LEFT JOIN Contractors k
+      ON k.ContractorId = g.ContractorId
+
+    OUTER APPLY (
+      SELECT TOP 1
+        d.DeploymentId,
+        d.SiteId,
+        d.Shift,
+        d.StartDate
+      FROM Deployments d
+      WHERE d.GuardId = g.GuardId
+        AND d.IsActive = 1
+      ORDER BY d.StartDate DESC
+    ) cur
+
+    LEFT JOIN Sites s
+      ON s.SiteId = cur.SiteId
+
+    LEFT JOIN Clients cl
+      ON cl.ClientId = s.ClientId
+  `,
+
+  selectCols: `
+    g.*,
+    k.Name AS ContractorName,
+    cur.DeploymentId,
+    cur.SiteId,
+    cur.Shift,
+    cur.StartDate AS DeployedSince,
+    s.SiteName,
+    cl.CompanyName
+  `,
+
+  searchFields: [
+    "g.FullName",
+    "g.GuardCode",
+    "g.Phone",
+    "g.AadhaarNo",
+    "s.SiteName",
+    "cl.CompanyName",
+  ],
+
+  filters: {
+    isActive: "g.IsActive",
+    contractorId: "g.ContractorId",
+    siteId: "cur.SiteId",
+    clientId: "s.ClientId",
+  },
+
+  orderBy: "g.FullName",
+
+  extraWhere: (req) =>
+    req.query.unassigned === "1"
+      ? {
+          sql: "cur.DeploymentId IS NULL AND g.IsActive = 1",
+        }
+      : null,
 });
 
-exports.list = base.list;
-exports.update = base.update;
+// ---- List guards
+export const list = base.list;
 
-exports.create = asyncHandler(async (req, res) => {
+// ---- Update guard
+export const update = base.update;
+
+// ---- Create guard
+export const create = asyncHandler(async (req, res) => {
   const data = base.pick(req.body);
+
   base.assertRequired(data, false);
+
   const id = await base.insert(data);
-  await query(`UPDATE Guards SET GuardCode = 'NSG-' + RIGHT('0000' + CAST(GuardId AS VARCHAR(10)), 4) WHERE GuardId = @id`, { id });
+
+  await query(
+    `UPDATE Guards
+     SET GuardCode = 'NSG-' +
+       RIGHT('0000' + CAST(GuardId AS VARCHAR(10)), 4)
+     WHERE GuardId = @id`,
+    { id },
+  );
+
   res.status(201).json(await base.findOne(id));
 });
 
-exports.getOne = asyncHandler(async (req, res) => {
+// ---- Get single guard with deployment history and payments
+export const getOne = asyncHandler(async (req, res) => {
   const guard = await base.findOne(req.params.id);
-  if (!guard) throw new ApiError(404, 'Guard not found');
+
+  if (!guard) {
+    throw new ApiError(404, "Guard not found");
+  }
+
   const history = await query(
-    `SELECT d.*, s.SiteName, cl.CompanyName FROM Deployments d
-     JOIN Sites s ON s.SiteId = d.SiteId JOIN Clients cl ON cl.ClientId = s.ClientId
-     WHERE d.GuardId = @id ORDER BY d.StartDate DESC, d.DeploymentId DESC`, { id: req.params.id });
+    `SELECT
+       d.*,
+       s.SiteName,
+       cl.CompanyName
+     FROM Deployments d
+     JOIN Sites s ON s.SiteId = d.SiteId
+     JOIN Clients cl ON cl.ClientId = s.ClientId
+     WHERE d.GuardId = @id
+     ORDER BY d.StartDate DESC, d.DeploymentId DESC`,
+    { id: req.params.id },
+  );
+
   const payments = await query(
-    `SELECT TOP 6 PaymentId, PayMonth, PayYear, PayableDays, GrossAmount, NetAmount, Status, PaidOn
-     FROM Payments WHERE GuardId = @id ORDER BY PayYear DESC, PayMonth DESC`, { id: req.params.id });
-  res.json({ ...guard, history: history.recordset, payments: payments.recordset });
+    `SELECT TOP 6
+       PaymentId,
+       PayMonth,
+       PayYear,
+       PayableDays,
+       GrossAmount,
+       NetAmount,
+       Status,
+       PaidOn
+     FROM Payments
+     WHERE GuardId = @id
+     ORDER BY PayYear DESC, PayMonth DESC`,
+    { id: req.params.id },
+  );
+
+  res.json({
+    ...guard,
+    history: history.recordset,
+    payments: payments.recordset,
+  });
 });
 
+// ---- Deactivate guard
 // Deactivating a guard also ends the current posting.
-exports.remove = asyncHandler(async (req, res) => {
+export const remove = asyncHandler(async (req, res) => {
   await withTransaction(async (run) => {
-    const r = await run('UPDATE Guards SET IsActive = 0 WHERE GuardId = @id', { id: req.params.id });
-    if (!r.rowsAffected[0]) throw new ApiError(404, 'Guard not found');
-    await run('UPDATE Deployments SET IsActive = 0, EndDate = CAST(SYSDATETIME() AS DATE) WHERE GuardId = @id AND IsActive = 1', { id: req.params.id });
+    const r = await run("UPDATE Guards SET IsActive = 0 WHERE GuardId = @id", {
+      id: req.params.id,
+    });
+
+    if (!r.rowsAffected[0]) {
+      throw new ApiError(404, "Guard not found");
+    }
+
+    await run(
+      `UPDATE Deployments
+       SET IsActive = 0,
+           EndDate = CAST(SYSDATETIME() AS DATE)
+       WHERE GuardId = @id
+         AND IsActive = 1`,
+      { id: req.params.id },
+    );
   });
-  res.json({ message: 'Guard deactivated' });
+
+  res.json({
+    message: "Guard deactivated",
+  });
 });
