@@ -1,2 +1,9 @@
 node_modules
 .env
+.env.*
+!.env.example
+# one-time helper scripts (create the first admin) - keep them off GitHub
+scripts/
+
+# SQL schema and migration files - keep my database structure off GitHub
+database/

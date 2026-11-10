@@ -44,12 +44,14 @@ export default function CrudPage({
   const submit = async (e) => {
     e.preventDefault();
     const errs = {};
-    fields.forEach((f) => { if (f.required && (values[f.name] === '' || values[f.name] == null)) errs[f.name] = `${f.label} is required`; });
+    const isNewForm = editing === 'new';
+    const shown = fields.filter((f) => !(isNewForm && f.editOnly) && !(!isNewForm && f.createOnly));
+    shown.forEach((f) => { if (f.required && (values[f.name] === '' || values[f.name] == null)) errs[f.name] = `${f.label} is required`; });
     setErrors(errs);
     if (Object.keys(errs).length) return;
     const isNew = editing === 'new';
     const body = {};
-    fields.filter((f) => f.type !== 'section' && !(isNew && f.editOnly)).forEach((f) => { body[f.name] = values[f.name]; });
+    fields.filter((f) => f.type !== 'section' && !(isNew && f.editOnly) && !(!isNew && f.createOnly)).forEach((f) => { body[f.name] = values[f.name]; });
     const action = isNew ? actions.create(body) : actions.update({ id: editing[idKey], body });
     try { await dispatch(action).unwrap(); setEditing(null); load(); } catch { /* toast already shown by api layer */ }
   };
@@ -113,7 +115,7 @@ export default function CrudPage({
         <Modal title={editing === 'new' ? `Add ${noun}` : `Edit ${noun}`} onClose={() => setEditing(null)} size={size}>
           <form onSubmit={submit} noValidate>
             <div className="grid gap-4 sm:grid-cols-2">
-              {fields.filter((f) => !(editing === 'new' && f.editOnly)).map((f) =>
+              {fields.filter((f) => !(editing === 'new' && f.editOnly) && !(editing !== 'new' && f.createOnly)).map((f) =>
                 f.type === 'section' ? (
                   <h3 key={f.label} className="border-b border-line pb-1 pt-2 text-sm font-semibold text-ink-700 sm:col-span-2">{f.label}</h3>
                 ) : (

@@ -50,7 +50,7 @@ export default function Guards() {
     { name: 'IsActive', label: 'Status', type: 'checkbox', hint: 'Active guard', editOnly: true },
   ], [cOpts]);
 
-  const columns = [
+  const allColumns = [
     { header: 'Code', key: 'GuardCode' },
     { header: 'Guard', render: (r) => <div><Link to={`/guards/${r.GuardId}`} className="font-medium hover:underline">{r.FullName}</Link><p className="text-xs text-steel">{r.Phone}</p></div> },
     { header: 'Posted at', render: (r) => r.SiteName ? <div><p>{r.SiteName}</p><p className="text-xs text-steel">{r.CompanyName} - {r.Shift}</p></div> : (r.IsActive ? <Badge tone="warn">Not assigned</Badge> : '-') },
@@ -58,6 +58,8 @@ export default function Guards() {
     { header: 'Salary', render: (r) => formatINR(r.MonthlySalary) },
     { header: 'Status', render: (r) => <Badge tone={r.IsActive ? 'ok' : 'neutral'}>{r.IsActive ? 'Active' : 'Inactive'}</Badge> },
   ];
+
+  const columns = isAdmin ? allColumns : allColumns.filter((c) => c.header !== 'Salary');
 
   const rowActions = (r) => (
     <>

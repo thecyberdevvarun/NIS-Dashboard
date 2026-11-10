@@ -10,6 +10,7 @@ const MODES = ['Bank transfer', 'UPI', 'Cash', 'Cheque'].map((v) => ({ value: v,
 export default function Payroll() {
   const dispatch = useDispatch();
   const { items, totals, loading, saving } = useSelector((s) => s.payroll);
+  const isAdmin = useSelector((s) => s.auth.user?.role === 'Admin');
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
@@ -68,7 +69,7 @@ export default function Payroll() {
     <>
       <PageHeader title="Payroll" subtitle="Monthly salary calculated from attendance">
         <button className="btn-ghost" onClick={exportCsv} disabled={!items.length}><Download size={16} /> Export CSV</button>
-        <button className="btn-accent" onClick={() => setConfirmGen(true)}><RefreshCw size={16} /> Generate payroll</button>
+        {isAdmin && <button className="btn-accent" onClick={() => setConfirmGen(true)}><RefreshCw size={16} /> Generate payroll</button>}
       </PageHeader>
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
@@ -85,7 +86,7 @@ export default function Payroll() {
         <StatCard label="Pending" value={formatINR(totals.pending)} tone={totals.pending ? 'warn' : undefined} />
       </div>
 
-      <DataTable columns={columns} rows={items} loading={loading} rowKey="PaymentId" empty={`No payroll for ${monthName(month)} ${year}. Use Generate payroll after marking attendance.`} />
+      <DataTable columns={isAdmin ? columns : columns.slice(0, -1)} rows={items} loading={loading} rowKey="PaymentId" empty={`No payroll for ${monthName(month)} ${year}. Use Generate payroll after marking attendance.`} />
 
       {confirmGen && (
         <ConfirmDialog title="Generate payroll" confirmLabel="Generate" busy={saving} onClose={() => setConfirmGen(false)} onConfirm={generate}

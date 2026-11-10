@@ -14,6 +14,7 @@ export default function GuardDetail() {
   const { id } = useParams();
   const dispatch = useDispatch();
   const { current: g, loading } = useSelector((s) => s.guards);
+  const isAdmin = useSelector((s) => s.auth.user?.role === 'Admin');
 
   useEffect(() => {
     dispatch(guards.actions.fetchOne(id));
@@ -42,9 +43,9 @@ export default function GuardDetail() {
             <Item label="Aadhaar" value={g.AadhaarNo} />
             <Item label="PAN" value={g.PanNo} />
             <Item label="UAN / ESIC" value={[g.UanNo, g.EsicNo].filter(Boolean).join(' / ')} />
-            <Item label="Bank" value={g.BankName} />
-            <Item label="Account no." value={g.AccountNo} />
-            <Item label="IFSC" value={g.IfscCode} />
+            {isAdmin && <Item label="Bank" value={g.BankName} />}
+            {isAdmin && <Item label="Account no." value={g.AccountNo} />}
+            {isAdmin && <Item label="IFSC" value={g.IfscCode} />}
             <Item label="Emergency contact" value={[g.EmergencyContactName, g.EmergencyContactPhone].filter(Boolean).join(' - ')} />
             <div className="col-span-2 sm:col-span-2"><Item label="Address" value={g.Address} /></div>
           </dl>
@@ -58,11 +59,11 @@ export default function GuardDetail() {
               <p className="mt-2 text-sm">{g.Shift} shift since {formatDate(g.DeployedSince)}</p>
             </>
           ) : <Badge tone="warn">Not assigned to any site</Badge>}
-          <div className="mt-5 border-t border-line pt-4">
+          {isAdmin && <div className="mt-5 border-t border-line pt-4">
             <p className="text-xs text-steel">Monthly salary</p>
             <p className="text-xl font-semibold">{formatINR(g.MonthlySalary)}</p>
             <p className="mt-1 text-xs text-steel">{g.PfApplicable ? 'PF' : 'No PF'} - {g.EsiApplicable ? 'ESI' : 'No ESI'}</p>
-          </div>
+          </div>}
         </section>
       </div>
 
@@ -75,14 +76,14 @@ export default function GuardDetail() {
         { header: 'To', render: (r) => (r.EndDate ? formatDate(r.EndDate) : <Badge tone="ok">Current</Badge>) },
       ]} />
 
-      <h2 className="mb-2 mt-6 font-semibold">Recent salary</h2>
-      <DataTable rowKey="PaymentId" rows={g.payments} empty="No salary generated yet" columns={[
+      {isAdmin && <h2 className="mb-2 mt-6 font-semibold">Recent salary</h2>}
+      {isAdmin && <DataTable rowKey="PaymentId" rows={g.payments} empty="No salary generated yet" columns={[
         { header: 'Month', render: (r) => `${monthName(r.PayMonth)} ${r.PayYear}` },
         { header: 'Days', key: 'PayableDays' },
         { header: 'Gross', render: (r) => formatINR(r.GrossAmount) },
         { header: 'Net pay', render: (r) => formatINR(r.NetAmount) },
         { header: 'Status', render: (r) => <Badge tone={r.Status === 'Paid' ? 'ok' : 'warn'}>{r.Status}{r.PaidOn ? ` ${formatDate(r.PaidOn)}` : ''}</Badge> },
-      ]} />
+      ]} />}
     </>
   );
 }

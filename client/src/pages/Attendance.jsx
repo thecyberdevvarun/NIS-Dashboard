@@ -18,6 +18,7 @@ function DailySheet() {
   const dispatch = useDispatch();
   const { sheet, loading, saving } = useSelector((s) => s.attendance);
   const siteOpts = useSelector((s) => s.sites.options);
+  const canMark = useSelector((s) => ['Admin', 'Supervisor'].includes(s.auth.user?.role));
   const [date, setDate] = useState(todayISO());
   const [siteId, setSiteId] = useState('');
   const [rows, setRows] = useState({});
@@ -48,7 +49,7 @@ function DailySheet() {
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <div><label className="label">Date</label><input type="date" className="input" max={todayISO()} value={date} onChange={(e) => setDate(e.target.value)} /></div>
         <div className="min-w-[260px] flex-1 sm:max-w-md"><label className="label">Site</label><Select value={siteId} onChange={setSiteId} options={siteSelect} placeholder="Select site" /></div>
-        {siteId && sheet.length > 0 && (
+        {canMark && siteId && sheet.length > 0 && (
           <div className="flex gap-2">
             <button className="btn-ghost" onClick={() => markAll('P')}>Mark all present</button>
             <button className="btn-ghost" onClick={() => markAll('')}>Clear</button>
@@ -70,7 +71,7 @@ function DailySheet() {
                   </div>
                   <div className="flex gap-1" role="group" aria-label={`Attendance for ${g.FullName}`}>
                     {STATUS.map((s) => (
-                      <button key={s.key} type="button" title={s.title} aria-pressed={rows[g.GuardId]?.status === s.key}
+                      <button key={s.key} type="button" disabled={!canMark} title={s.title} aria-pressed={rows[g.GuardId]?.status === s.key}
                         onClick={() => setRow(g.GuardId, { status: s.key })}
                         className={`h-9 w-11 rounded border text-sm font-medium transition-colors ${rows[g.GuardId]?.status === s.key ? s.on : 'border-line bg-white text-ink-700 hover:bg-paper'}`}>
                         {s.label}
@@ -78,7 +79,7 @@ function DailySheet() {
                     ))}
                   </div>
                   <label className="flex items-center gap-2 text-sm text-steel">OT hrs
-                    <input type="number" min="0" max="24" step="0.5" className="input w-20 py-1.5" value={rows[g.GuardId]?.otHours ?? 0}
+                    <input type="number" min="0" max="24" step="0.5" disabled={!canMark} className="input w-20 py-1.5" value={rows[g.GuardId]?.otHours ?? 0}
                       onChange={(e) => setRow(g.GuardId, { otHours: e.target.value })} />
                   </label>
                 </div>
@@ -89,7 +90,7 @@ function DailySheet() {
                 {STATUS.filter((s) => counts[s.key]).map((s) => `${s.title} ${counts[s.key]}`).join('  |  ') || 'Nothing marked yet'}
                 {unmarked > 0 && <span className="ml-3 text-signal-dark">{unmarked} not marked</span>}
               </p>
-              <button className="btn-primary" disabled={saving} onClick={save}>{saving ? 'Saving...' : 'Save attendance'}</button>
+              {canMark ? <button className="btn-primary" disabled={saving} onClick={save}>{saving ? 'Saving...' : 'Save attendance'}</button> : <span className="text-sm text-steel">View only</span>}
             </div>
           </>
         )}

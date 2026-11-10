@@ -12,7 +12,17 @@ export const login = createAsyncThunk('auth/login', async (credentials) => {
   return data;
 });
 
-export const fetchMe = createAsyncThunk('auth/me', async () => (await api.get('/auth/me')).data);
+export const fetchMe = createAsyncThunk('auth/me', async () => {
+  const { data } = await api.get('/auth/me');
+  localStorage.setItem(USER_KEY, JSON.stringify(data));
+  return data;
+});
+
+export const changePassword = createAsyncThunk('auth/changePassword', async (body) => {
+  const { data } = await api.post('/auth/change-password', body);
+  toast.success('Password changed successfully');
+  return data;
+});
 
 const slice = createSlice({
   name: 'auth',
